@@ -12,6 +12,10 @@
       "dest": "/api/status.py"
     },
     {
+      "src": "/trade",
+      "dest": "/api/trade.py"
+    },
+    {
       "src": "/",
       "dest": "/api/index.py"
     }
