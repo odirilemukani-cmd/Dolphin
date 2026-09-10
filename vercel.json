@@ -16,6 +16,18 @@
       "dest": "/api/trade.py"
     },
     {
+      "src": "/control",
+      "dest": "/api/control.py"
+    },
+    {
+      "src": "/signal",
+      "dest": "/api/signal.py"
+    },
+    {
+      "src": "/position",
+      "dest": "/api/position.py"
+    },
+    {
       "src": "/",
       "dest": "/api/index.py"
     }
