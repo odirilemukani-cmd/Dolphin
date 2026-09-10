@@ -1,78 +1,269 @@
 from http.server import BaseHTTPRequestHandler
 import json
-import os
+
+from _viper import (
+    authenticated,
+    STATE,
+    risk_allowed,
+    register_trade,
+    normalize_action,
+    valid_side,
+    generate_id
+)
 
 
 class handler(BaseHTTPRequestHandler):
 
-    def send_json(self, status_code, data):
-        self.send_response(status_code)
-        self.send_header("Content-Type", "application/json")
+    def send_json(self, status, data):
+
+        self.send_response(status)
+
+        self.send_header(
+            "Content-Type",
+            "application/json"
+        )
+
+        self.send_header(
+            "Cache-Control",
+            "no-store"
+        )
+
         self.end_headers()
 
         self.wfile.write(
             json.dumps(data).encode("utf-8")
         )
 
+
     def do_POST(self):
 
-        # Check API key
-        api_key = self.headers.get("X-Dolphin-Key")
-        correct_key = os.environ.get("DOLPHIN_API_KEY")
+        # Check Viper API key
+        if not authenticated(self.headers):
 
-        if not correct_key or api_key != correct_key:
-            self.send_json(401, {
-                "bot": "Dolphin",
-                "status": "error",
-                "message": "Unauthorized"
-            })
-            return
-
-        try:
-            length = int(
-                self.headers.get("Content-Length", 0)
+            self.send_json(
+                401,
+                {
+                    "bot": "Viper",
+                    "status": "error",
+                    "message": "Unauthorized"
+                }
             )
 
-            body = self.rfile.read(length)
+            return
 
-            data = json.loads(body) if body else {}
 
-            symbol = data.get("symbol", "XAUUSD")
-            action = data.get("action", "").upper()
-            lot = float(data.get("lot", 0.01))
+        # Read request
+        try:
 
-            if action not in ["BUY", "SELL"]:
-                self.send_json(400, {
-                    "bot": "Dolphin",
+            length = int(
+                self.headers.get(
+                    "Content-Length",
+                    "0"
+                )
+            )
+
+            raw = self.rfile.read(length)
+
+            data = json.loads(
+                raw.decode("utf-8")
+            )
+
+        except Exception:
+
+            self.send_json(
+                400,
+                {
+                    "bot": "Viper",
                     "status": "error",
-                    "message": "Action must be BUY or SELL"
-                })
-                return
+                    "message": "Invalid JSON"
+                }
+            )
 
-            if lot <= 0:
-                self.send_json(400, {
-                    "bot": "Dolphin",
+            return
+
+
+        # Risk check
+        allowed, reason = risk_allowed()
+
+        if not allowed:
+
+            self.send_json(
+                403,
+                {
+                    "bot": "Viper",
+                    "status": "blocked",
+                    "message": reason
+                }
+            )
+
+            return
+
+
+        # Get action
+        action = normalize_action(
+            data.get("action", "")
+        )
+
+
+        # Validate action
+        if not valid_side(action):
+
+            self.send_json(
+                400,
+                {
+                    "bot": "Viper",
                     "status": "error",
-                    "message": "Lot must be greater than 0"
-                })
-                return
+                    "message": "Invalid action"
+                }
+            )
 
-            response = {
-                "bot": "Dolphin",
-                "status": "paper_trade_received",
-                "mode": "paper",
-                "symbol": symbol,
-                "action": action,
-                "lot": lot,
-                "message": "Paper trade accepted. No real trade was placed."
+            return
+
+
+        symbol = str(
+            data.get(
+                "symbol",
+                STATE.symbol
+            )
+        ).upper()
+
+
+        timeframe = str(
+            data.get(
+                "timeframe",
+                STATE.timeframe
+            )
+        ).upper()
+
+
+        # Validate lot
+        try:
+
+            lot = float(
+                data.get(
+                    "lot",
+                    STATE.lot
+                )
+            )
+
+        except Exception:
+
+            self.send_json(
+                400,
+                {
+                    "bot": "Viper",
+                    "status": "error",
+                    "message": "Invalid lot"
+                }
+            )
+
+            return
+
+
+        if lot <= 0:
+
+            self.send_json(
+                400,
+                {
+                    "bot": "Viper",
+                    "status": "error",
+                    "message": "Lot must be greater than zero"
+                }
+            )
+
+            return
+
+
+        # Optional order prices
+        entry = data.get("entry")
+
+        stop_loss = data.get(
+            "stop_loss"
+        )
+
+
+        # Generate order ID
+        order_id = generate_id()
+
+
+        # Register trade
+        register_trade()
+
+
+        mode = STATE.mode
+
+
+        if mode == "paper":
+
+            status = "paper_trade_accepted"
+
+            execution = {
+
+                "executed": False,
+
+                "broker": "paper"
+
             }
 
-            self.send_json(200, response)
+            message = (
+                "Paper trade recorded. "
+                "No real money was used."
+            )
 
-        except Exception as error:
+        else:
 
-            self.send_json(400, {
-                "bot": "Dolphin",
-                "status": "error",
-                "message": str(error)
-            })
+            status = (
+                "live_order_accepted_by_api"
+            )
+
+            execution = {
+
+                "executed": False,
+
+                "broker":
+                    "broker_adapter_required"
+
+            }
+
+            message = (
+                "Order accepted by Viper API. "
+                "A connected broker adapter "
+                "must execute it."
+            )
+
+
+        # Response
+        self.send_json(
+            200,
+            {
+
+                "bot": "Viper",
+
+                "status": status,
+
+                "mode": mode,
+
+                "order": {
+
+                    "id": order_id,
+
+                    "symbol": symbol,
+
+                    "timeframe": timeframe,
+
+                    "action": action,
+
+                    "lot": lot,
+
+                    "entry": entry,
+
+                    "stop_loss": stop_loss
+
+                },
+
+                "execution": execution,
+
+                "message": message
+
+            }
+        )
