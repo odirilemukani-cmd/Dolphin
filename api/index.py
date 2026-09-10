@@ -1,7 +1,7 @@
 from http.server import BaseHTTPRequestHandler
 import json
 
-from _viper import (
+from api._viper import (
     BOT_NAME,
     json_safe_state
 )
